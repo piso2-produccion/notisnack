@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NotiSnack</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@700;900&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="ns-header">
+    <div class="ns-logo">Noti<span>Snack</span></div>
+    <div class="ns-header-right">
+      <div class="ns-update">
+        <span class="ns-dot"></span>
+        <span id="ultima-actualizacion">Cargando...</span>
+      </div>
+      <button class="ns-login-btn" id="btn-login" onclick="loginConGoogle()">Iniciar sesión</button>
+      <div class="ns-user-menu" id="user-menu" style="display:none">
+        <img id="user-avatar" src="" alt="" />
+        <span id="user-name"></span>
+        <button onclick="logout()">Salir</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="ns-body">
+    <section class="ns-feed">
+
+      <div class="ns-leer-todo-bar">
+        <div class="ns-leer-todo-left">
+          <div class="ns-locutores">
+            <div class="ns-locutor-avatar joaco" id="avatar-joaco" title="Joaco">J</div>
+            <div class="ns-locutor-avatar sofi" id="avatar-sofi" title="Sofi">S</div>
+          </div>
+          <div class="ns-leer-todo-info">
+            <div class="ns-leer-todo-title">Joaco y Sofi te informan</div>
+            <div class="ns-now-reading" id="now-reading-bar">
+              <div class="ns-wave"><span></span><span></span><span></span></div>
+              <span id="now-reading-text">Leyendo...</span>
+            </div>
+            <div class="ns-leer-todo-sub" id="leer-todo-sub">Cargando noticias...</div>
+          </div>
+        </div>
+        <button class="ns-btn-leer-todo" id="btn-leer-todo" onclick="toggleLeerTodo()">
+          ▶ Leer todo
+        </button>
+      </div>
+
+      <div class="ns-section-label">Argentina · hoy</div>
+      <div id="feed-container">
+        <div class="ns-loading">Cargando noticias...</div>
+      </div>
+
+    </section>
+
+    <aside class="ns-sidebar">
+      <div class="ns-section-label">Internacional</div>
+      <div id="intl-container">
+        <div class="ns-loading">Cargando...</div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="ns-footer-bar">
+    NotiSnack · <span id="proximo-update">Próxima actualización calculando...</span>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>
