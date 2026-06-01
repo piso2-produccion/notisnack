@@ -1,12 +1,11 @@
 const { createClient } = require('@supabase/supabase-js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Anthropic = require('@anthropic-ai/sdk');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const FUENTES_ARG = [
   { nombre: 'Clarín', url: 'https://www.clarin.com', tipo: 'argentina' },
@@ -32,11 +31,18 @@ async function fetchHTML(url) {
 
 function extraerTitulares(html) {
   const titulos = [];
-  const h2Regex = /<h2[^>]*>([^<]{20,200})<\/h2>/gi;
-  let match;
-  while ((match = h2Regex.exec(html)) !== null) {
-    const texto = match[1].replace(/<[^>]+>/g, '').trim();
-    if (texto.length > 20) titulos.push(texto);
+  const regexes = [
+    /<h1[^>]*>([^<]{20,200})<\/h1>/gi,
+    /<h2[^>]*>([^<]{20,200})<\/h2>/gi,
+    /<h3[^>]*>([^<]{20,200})<\/h3>/gi,
+  ];
+  for (const regex of regexes) {
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+      const texto = match[1].replace(/<[^>]+>/g, '').trim();
+      if (texto.length > 20 && !titulos.includes(texto)) titulos.push(texto);
+      if (titulos.length >= 8) break;
+    }
     if (titulos.length >= 8) break;
   }
   const ogImageRegex = /<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i;
@@ -45,9 +51,7 @@ function extraerTitulares(html) {
   return { titulos, imagen };
 }
 
-async function procesarConGemini(titulos, fuente) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
+async function procesarConClaude(titulos, fuente) {
   const prompt = `Sos un periodista argentino. Te doy titulares del diario "${fuente}".
 Para cada uno generá un copete de máximo 2 oraciones en español argentino, descontracturado y claro.
 Respondé SOLO con JSON válido, sin texto extra, sin markdown.
@@ -57,8 +61,13 @@ El texto_audio debe empezar con "${fuente} informa. " y resumir la noticia.
 Titulares:
 ${titulos.map((t, i) => `${i + 1}. ${t}`).join('\n')}`;
 
-  const result = await model.generateContent(prompt);
-  const texto = result.response.text();
+  const message = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 2000,
+    messages: [{ role: 'user', content: prompt }]
+  });
+
+  const texto = message.content[0].text;
   const clean = texto.replace(/```json|```/g, '').trim();
   return JSON.parse(clean);
 }
@@ -74,7 +83,7 @@ async function scrapeYGuardar(fuente) {
       return;
     }
 
-    const noticias = await procesarConGemini(titulos, fuente.nombre);
+    const noticias = await procesarConClaude(titulos, fuente.nombre);
 
     const rows = noticias.map(n => ({
       titulo: n.titulo,
