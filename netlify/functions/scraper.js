@@ -1,10 +1,12 @@
 const { createClient } = require('@supabase/supabase-js');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 
 const FUENTES_ARG = [
   { nombre: 'Clarín', url: 'https://www.clarin.com', tipo: 'argentina' },
@@ -44,6 +46,8 @@ function extraerTitulares(html) {
 }
 
 async function procesarConGemini(titulos, fuente) {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
   const prompt = `Sos un periodista argentino. Te doy titulares del diario "${fuente}".
 Para cada uno generá un copete de máximo 2 oraciones en español argentino, descontracturado y claro.
 Respondé SOLO con JSON válido, sin texto extra, sin markdown.
@@ -53,23 +57,8 @@ El texto_audio debe empezar con "${fuente} informa. " y resumir la noticia.
 Titulares:
 ${titulos.map((t, i) => `${i + 1}. ${t}`).join('\n')}`;
 
-  const res = await fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': GEMINI_KEY
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2000 }
-      })
-    }
-  );
-
-  const data = await res.json();
-  const texto = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+  const result = await model.generateContent(prompt);
+  const texto = result.response.text();
   const clean = texto.replace(/```json|```/g, '').trim();
   return JSON.parse(clean);
 }
