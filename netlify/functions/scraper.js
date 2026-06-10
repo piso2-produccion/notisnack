@@ -1,101 +1,80 @@
 const { createClient } = require('@supabase/supabase-js');
-const Anthropic = require('@anthropic-ai/sdk');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const FUENTES_ARG = [
-  { nombre: 'Clarín', url: 'https://www.clarin.com', tipo: 'argentina' },
-  { nombre: 'La Nación', url: 'https://www.lanacion.com.ar', tipo: 'argentina' },
-  { nombre: 'Infobae', url: 'https://www.infobae.com', tipo: 'argentina' },
-  { nombre: 'Página 12', url: 'https://www.pagina12.com.ar', tipo: 'argentina' },
-  { nombre: 'Ámbito', url: 'https://www.ambito.com', tipo: 'argentina' },
+const FUENTES = [
+  { nombre: 'Clarín', rss: 'https://www.clarin.com/rss/lo-ultimo/', tipo: 'argentina' },
+  { nombre: 'La Nación', rss: 'https://www.lanacion.com.ar/arc/outboundfeeds/rss/', tipo: 'argentina' },
+  { nombre: 'Infobae', rss: 'https://www.infobae.com/feeds/rss/', tipo: 'argentina' },
+  { nombre: 'Página 12', rss: 'https://www.pagina12.com.ar/rss/portada', tipo: 'argentina' },
+  { nombre: 'Ámbito', rss: 'https://www.ambito.com/rss/home.xml', tipo: 'argentina' },
+  { nombre: 'BBC News', rss: 'https://feeds.bbci.co.uk/news/rss.xml', tipo: 'internacional' },
+  { nombre: 'The New York Times', rss: 'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml', tipo: 'internacional' },
+  { nombre: 'El País', rss: 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada', tipo: 'internacional' },
+  { nombre: 'Le Monde', rss: 'https://www.lemonde.fr/rss/une.xml', tipo: 'internacional' },
 ];
 
-const FUENTES_INTL = [
-  { nombre: 'BBC News', url: 'https://www.bbc.com/news', tipo: 'internacional' },
-  { nombre: 'The New York Times', url: 'https://www.nytimes.com', tipo: 'internacional' },
-  { nombre: 'El País', url: 'https://elpais.com', tipo: 'internacional' },
-  { nombre: 'Le Monde', url: 'https://www.lemonde.fr', tipo: 'internacional' },
-];
-
-async function fetchHTML(url) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NotiSnack/1.0)' }
-  });
-  return res.text();
+function extraerTexto(str) {
+  if (!str) return '';
+  return str.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'").trim();
 }
 
-function extraerTitulares(html) {
-  const titulos = [];
-  const regexes = [
-    /<h1[^>]*>([^<]{20,200})<\/h1>/gi,
-    /<h2[^>]*>([^<]{20,200})<\/h2>/gi,
-    /<h3[^>]*>([^<]{20,200})<\/h3>/gi,
-  ];
-  for (const regex of regexes) {
-    let match;
-    while ((match = regex.exec(html)) !== null) {
-      const texto = match[1].replace(/<[^>]+>/g, '').trim();
-      if (texto.length > 20 && !titulos.includes(texto)) titulos.push(texto);
-      if (titulos.length >= 8) break;
-    }
-    if (titulos.length >= 8) break;
-  }
-  const ogImageRegex = /<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i;
-  const imgMatch = ogImageRegex.exec(html);
-  const imagen = imgMatch ? imgMatch[1] : null;
-  return { titulos, imagen };
+function extraerImagen(item) {
+  const mediaContent = item.match(/<media:content[^>]*url=["']([^"']+)["']/i);
+  if (mediaContent) return mediaContent[1];
+  const enclosure = item.match(/<enclosure[^>]*url=["']([^"']+)["']/i);
+  if (enclosure) return enclosure[1];
+  const imgTag = item.match(/<img[^>]*src=["']([^"']+)["']/i);
+  if (imgTag) return imgTag[1];
+  return null;
 }
 
-async function procesarConClaude(titulos, fuente) {
-  const prompt = `Sos un periodista argentino. Te doy titulares del diario "${fuente}".
-Para cada uno generá un copete de máximo 2 oraciones en español argentino, descontracturado y claro.
-Respondé SOLO con JSON válido, sin texto extra, sin markdown.
-Formato: [{"titulo": "...", "copete": "...", "texto_audio": "..."}]
-El texto_audio debe empezar con "${fuente} informa. " y resumir la noticia.
-
-Titulares:
-${titulos.map((t, i) => `${i + 1}. ${t}`).join('\n')}`;
-
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 2000,
-    messages: [{ role: 'user', content: prompt }]
-  });
-
-  const texto = message.content[0].text;
-  const clean = texto.replace(/```json|```/g, '').trim();
-  return JSON.parse(clean);
-}
-
-async function scrapeYGuardar(fuente) {
+async function procesarFuente(fuente) {
   try {
-    console.log(`Scrapeando ${fuente.nombre}...`);
-    const html = await fetchHTML(fuente.url);
-    const { titulos, imagen } = extraerTitulares(html);
+    console.log(`Procesando ${fuente.nombre}...`);
+    const res = await fetch(fuente.rss, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NotiSnack/1.0)' }
+    });
+    const xml = await res.text();
 
-    if (!titulos.length) {
-      console.log(`Sin titulares para ${fuente.nombre}`);
+    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+    const items = [];
+    let match;
+    while ((match = itemRegex.exec(xml)) !== null) {
+      items.push(match[1]);
+      if (items.length >= 6) break;
+    }
+
+    if (!items.length) {
+      console.log(`Sin items para ${fuente.nombre}`);
       return;
     }
 
-    const noticias = await procesarConClaude(titulos, fuente.nombre);
+    const rows = items.map(item => {
+      const tituloMatch = item.match(/<title[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/title>|<title[^>]*>([\s\S]*?)<\/title>/i);
+      const copeteMatch = item.match(/<description[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/description>|<description[^>]*>([\s\S]*?)<\/description>/i);
 
-    const rows = noticias.map(n => ({
-      titulo: n.titulo,
-      copete: n.copete,
-      texto_audio: n.texto_audio,
-      fuente: fuente.nombre,
-      imagen: imagen,
-      tipo: fuente.tipo,
-      es_twitter: false,
-      tiempo: 'hace unos minutos',
-      created_at: new Date().toISOString()
-    }));
+      const titulo = extraerTexto(tituloMatch ? (tituloMatch[1] || tituloMatch[2]) : '');
+      const copete = extraerTexto(copeteMatch ? (copeteMatch[1] || copeteMatch[2]) : '').substring(0, 300);
+      const imagen = extraerImagen(item);
+
+      if (!titulo) return null;
+
+      return {
+        titulo,
+        copete: copete || titulo,
+        texto_audio: `${fuente.nombre} informa. ${titulo}. ${copete}`.substring(0, 500),
+        fuente: fuente.nombre,
+        imagen,
+        tipo: fuente.tipo,
+        es_twitter: false,
+        tiempo: 'hace unos minutos',
+        created_at: new Date().toISOString()
+      };
+    }).filter(Boolean);
 
     await supabase.from('noticias').delete().eq('fuente', fuente.nombre);
     const { error } = await supabase.from('noticias').insert(rows);
@@ -108,9 +87,9 @@ async function scrapeYGuardar(fuente) {
 
 exports.handler = async (event, context) => {
   try {
-    console.log('Iniciando scraping...');
-    for (const fuente of [...FUENTES_ARG, ...FUENTES_INTL]) {
-      await scrapeYGuardar(fuente);
+    console.log('Iniciando scraping por RSS...');
+    for (const fuente of FUENTES) {
+      await procesarFuente(fuente);
     }
     return {
       statusCode: 200,
